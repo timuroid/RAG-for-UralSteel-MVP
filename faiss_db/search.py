@@ -1,4 +1,5 @@
 import faiss
+import os
 import numpy as np
 import sqlite3
 from langchain_community.embeddings import OpenAIEmbeddings  # Обновленная версия
@@ -33,12 +34,20 @@ def convert_to_serializable(data):
         return data
 
 
+# Глобальный кэш для индексов FAISS
+faiss_indices = None  
+
 def load_indices():
-    """Загружает все три индекса FAISS с диска."""
-    title_index = faiss.read_index(os.path.join(FAISS_INDEX_PATH, "title_index.faiss"))
-    cause_index = faiss.read_index(os.path.join(FAISS_INDEX_PATH, "cause_index.faiss"))
-    solution_index = faiss.read_index(os.path.join(FAISS_INDEX_PATH, "solution_index.faiss"))
-    return title_index, cause_index, solution_index
+    """Загружает индексы FAISS в память один раз при старте."""
+    global faiss_indices
+    if faiss_indices is None:
+        print("📥 Загружаем FAISS индексы в память...")
+        faiss_indices = {
+            "title": faiss.read_index(os.path.join(FAISS_INDEX_PATH, "title_index.faiss")),
+            "cause": faiss.read_index(os.path.join(FAISS_INDEX_PATH, "cause_index.faiss")),
+            "solution": faiss.read_index(os.path.join(FAISS_INDEX_PATH, "solution_index.faiss")),
+        }
+    return faiss_indices
 
 
 def embed_query(query):
@@ -98,33 +107,35 @@ def remove_duplicates(metadata):
 
 
 def search_problem(query):
-    """Функция поиска по запросу, возвращает результат в формате JSON."""
-    title_index, cause_index, solution_index = load_indices()
+    """Оптимизированная функция поиска по запросу, возвращает JSON-результат."""
+    indices = load_indices()  # Используем уже загруженные индексы
     query_vector = embed_query(query)
 
-    title_ids, title_distances = search_index(title_index, query_vector)
-    cause_ids, cause_distances = search_index(cause_index, query_vector)
-    solution_ids, solution_distances = search_index(solution_index, query_vector)
+    # Выполняем поиск по всем индексам
+    title_ids, title_distances = search_index(indices["title"], query_vector)
+    cause_ids, cause_distances = search_index(indices["cause"], query_vector)
+    solution_ids, solution_distances = search_index(indices["solution"], query_vector)
 
+    # Извлекаем метаданные
     title_metadata = get_metadata(title_ids, title_distances)
     cause_metadata = get_metadata(cause_ids, cause_distances)
     solution_metadata = get_metadata(solution_ids, solution_distances)
 
-    # Удаление дубликатов
-    combined_metadata = title_metadata + cause_metadata + solution_metadata
-    unique_metadata = {json.dumps(convert_to_serializable(record), ensure_ascii=False): record
-                      for record in combined_metadata}.values()
+    # Объединяем результаты и удаляем дубликаты по ключевым полям
+    seen = set()
+    unique_metadata = []
+    for record in title_metadata + cause_metadata + solution_metadata:
+        record_tuple = (record["название"], record["описание"], record["решение"])
+        if record_tuple not in seen:
+            seen.add(record_tuple)
+            # Конвертация distance из float32 в float
+            record["distance"] = float(record["distance"])
+            unique_metadata.append(record)
 
-    # Сортировка уникальных записей по расстоянию (от меньшего к большему), затем реверс
-    sorted_metadata = sorted(unique_metadata, key=lambda x: x["distance"], reverse=False)
+    # Сортируем по расстоянию (чем меньше, тем лучше)
+    sorted_metadata = sorted(unique_metadata, key=lambda x: x["distance"])
 
-    result = {"проблемы": list(sorted_metadata)}
-
-    # Преобразование результата в сериализуемый формат
-    result_serializable = convert_to_serializable(result)
-
-    return json.dumps(result_serializable, ensure_ascii=False, indent=4)
-
+    return json.dumps({"проблемы": sorted_metadata}, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
     query = input("Введите текстовый запрос: ")

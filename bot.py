@@ -1,4 +1,4 @@
-
+import gc
 import logging
 import openai
 import json
@@ -203,6 +203,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         WAITING_FOR_CONFIRMATION = True
         
+        # ✅ Очищаем временные переменные после использования, если они существуют
+        for var_name in ["metadata_json", "metadata_list", "final_response", "formatted_response"]:
+            if var_name in locals():
+                del locals()[var_name]
+                
+        gc.collect()  # Принудительная очистка памяти
+
     except Exception as e:
         logging.error(f"Ошибка при обработке запроса: {e}")
         await update.message.reply_text("Произошла ошибка при обработке вашего запроса. Попробуйте снова.")
