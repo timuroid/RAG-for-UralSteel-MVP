@@ -6,18 +6,28 @@ from langchain_community.embeddings import OpenAIEmbeddings  # Обновлен�
 import os
 import time
 import json
-from config import OPENAI_API_KEY
+import sys
+# Ensure project root is on sys.path to import config when running as a script
+CURRENT_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, os.pardir))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from config import OPENAI_API_KEY, FAISS_INDEX_PATH, SQLITE_DB_PATH, TOP_K, DIMENSION, EMBEDDING_MODEL
 
 # Конфигурация
-FAISS_INDEX_PATH = "./faiss_index"
-SQLITE_DB_PATH = "./faiss_index/metadata.db"
+FAISS_INDEX_PATH = FAISS_INDEX_PATH  # from config
+SQLITE_DB_PATH = SQLITE_DB_PATH  # from config
 OPENAI_API_KEY =  OPENAI_API_KEY
-DIMENSION = 1536
-TOP_K = 5  # Количество ближайших совпадений
+DIMENSION = DIMENSION  # from config
+import config as _cfg
+TOP_K = _cfg.TOP_K
+TOP_K = 15  # Количество ближайших совпадений
 
 
 # Инициализация эмбеддингов
-embeddings = OpenAIEmbeddings(model="text-embedding-ada-002", openai_api_key=OPENAI_API_KEY)
+TOP_K = _cfg.TOP_K
+embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=OPENAI_API_KEY)
 
 
 def convert_to_serializable(data):
@@ -78,6 +88,10 @@ def get_metadata(ids, distances):
             WHERE id = ?
         """, (id_,))
         row = cursor.fetchone()
+        # Fallback: если запись не найдена по (faiss_id + 1), пробуем exact faiss_id
+        if not row:
+            cursor.execute("SELECT idea_number, status, title, cause, solution FROM metadata WHERE id = ?", (id_ - 1,))
+            row = cursor.fetchone()
         if row:
             results.append({
                 "distance": distance,

@@ -5,21 +5,23 @@ import os
 import time
 import asyncio
 import sqlite3
-from langchain.embeddings import OpenAIEmbeddings
+import sys
+from langchain_community.embeddings import OpenAIEmbeddings
 from tqdm.asyncio import tqdm as async_tqdm
-from config import OPENAI_API_KEY
+# Ensure project root is on sys.path to import config when running as a script
+CURRENT_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, os.pardir))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from config import OPENAI_API_KEY, FAISS_INDEX_PATH, SQLITE_DB_PATH, DATA_FILE, EMBEDDING_MODEL, DIMENSION
 
 # Конфигурация
-DATA_FILE = "bd.xlsx"
-FAISS_INDEX_PATH = "./faiss_index"
-SQLITE_DB_PATH = "metadata.db"
-OPENAI_API_KEY =  OPENAI_API_KEY
 BATCH_SIZE = 1000
-DIMENSION = 1536
 MAX_CONCURRENT_TASKS = 1
 
 # Инициализация эмбеддингов
-embeddings = OpenAIEmbeddings(model="text-embedding-ada-002", openai_api_key=OPENAI_API_KEY)
+embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=OPENAI_API_KEY)
 
 
 async def embed_texts(texts):
@@ -30,6 +32,10 @@ async def embed_texts(texts):
 
 def initialize_metadata_db():
     """Создает таблицу для хранения метаданных, если она не существует."""
+    db_dir = os.path.dirname(os.path.abspath(SQLITE_DB_PATH))
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -83,7 +89,7 @@ async def process_batch(batch, title_index, cause_index, solution_index, progres
 
     # Векторизация всех трех колонок одновременно
     texts_to_vectorize = batch["Название"].tolist() + batch["Причина"].tolist() + batch["Решение"].tolist()
-    vectors = await embed_texts(texts_to_vectorize)
+    vectors = await embed_texts(["" if x is None else (x if isinstance(x, str) else str(x)) for x in texts_to_vectorize])
 
     # Разделение векторов на три части
     title_vectors = np.array(vectors[:len(batch)]).astype(np.float32)
@@ -116,9 +122,10 @@ def get_max_id():
 async def load_data():
     """Асинхронное наполнение базы данных FAISS и сохранение метаданных в SQLite."""
     print("📥 Загрузка данных из Excel...")
-    df = pd.read_excel(DATA_FILE, header=1, engine='openpyxl')
+    df = pd.read_excel(DATA_FILE, header=0, engine='openpyxl')
     df = df[['Номер Идеи', 'Название', 'Причина', 'Решение', 'Статус Идеи']].dropna().reset_index(drop=True)
-    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    # Удаляем лишние пробелы в строковых столбцах, избегая устаревшего applymap
+    df = df.apply(lambda s: s.str.strip() if s.dtype == object else s)
 
     # Создание индексов
     title_index = faiss.IndexFlatL2(DIMENSION)
