@@ -64,8 +64,9 @@ def generate_final_response_dual(results_db1, results_db2, user_query):
     ]
 
     resp = openai.ChatCompletion.create(
-        model="gpt-5",
-        messages=messages
+        model="gpt-4o-2024-08-06",
+        messages=messages,
+        temperature=0.5,
     )
 
     text = resp["choices"][0]["message"]["content"].strip()
