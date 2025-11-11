@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+﻿from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import json
 import openai
@@ -7,8 +7,8 @@ import faiss
 import os
 
 from config import OPENAI_API_KEY
-from faiss_db.search import search_problem
-from chatgpt_handler import generate_final_response
+from faiss_db.search import search_problem_dual
+from chatgpt_handler import generate_final_response_dual
 from faiss_db.search import load_indices
 from config import SQLITE_DB_PATH, FAISS_INDEX_PATH
 
@@ -40,47 +40,37 @@ def ask(req: QueryRequest):
         raise HTTPException(status_code=400, detail="query must be a non-empty string")
 
     try:
-        # 1) Поиск по FAISS + SQLite
-        metadata_json = search_problem(user_query)
+        # 1) РџРѕРёСЃРє РїРѕ FAISS + SQLite
+        metadata_json = search_problem_dual(user_query)
         parsed = json.loads(metadata_json)
-        # Поддержка разных ключей и форматов (берём первый список из корня)
-        metadata_list = []
-        if isinstance(parsed, list):
-            metadata_list = parsed
-        elif isinstance(parsed, dict):
-            # Явные ключи + авто‑поиск первого list-значения
-            candidates = [
-                parsed.get("Данные"),
-                parsed.get("данные"),
-                parsed.get("проблемы"),
-                parsed.get("�஡����"),
-                parsed.get("data"),
-                parsed.get("results"),
-            ]
-            metadata_list = next((v for v in candidates if isinstance(v, list)), None)
-            if metadata_list is None:
+        results_db1, results_db2 = [], []
+        if isinstance(parsed, dict):
+            if isinstance(parsed.get("results_db1"), list):
+                results_db1 = parsed.get("results_db1")
+            if isinstance(parsed.get("results_db2"), list):
+                results_db2 = parsed.get("results_db2")
+            if not results_db1 and not results_db2:
                 for v in parsed.values():
                     if isinstance(v, list):
-                        metadata_list = v
+                        results_db1 = v
                         break
-            if metadata_list is None:
-                metadata_list = []
+        elif isinstance(parsed, list):
+            results_db1 = parsed
 
-        # 2) Генерация финального ответа GPT
-        final_response, token_count = generate_final_response(metadata_list, user_query)
+        final_response, token_count = generate_final_response_dual(results_db1, results_db2, user_query)
 
         return QueryResponse(answer=final_response, token_count=token_count)
 
     except HTTPException:
         raise
     except Exception as e:
-        # Прокидываем как 500, чтобы клиент получил понятную ошибку
+        # РџСЂРѕРєРёРґС‹РІР°РµРј РєР°Рє 500, С‡С‚РѕР±С‹ РєР»РёРµРЅС‚ РїРѕР»СѓС‡РёР» РїРѕРЅСЏС‚РЅСѓСЋ РѕС€РёР±РєСѓ
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
 @app.get("/debug/storage")
 def debug_storage():
-    """Диагностика: размеры индексов и статистика БД."""
+    """Р”РёР°РіРЅРѕСЃС‚РёРєР°: СЂР°Р·РјРµСЂС‹ РёРЅРґРµРєСЃРѕРІ Рё СЃС‚Р°С‚РёСЃС‚РёРєР° Р‘Р”."""
     try:
         idxs = load_indices()
         idx_sizes = {k: v.ntotal for k, v in idxs.items()}
@@ -105,10 +95,10 @@ def debug_storage():
 
 
 @app.get("/debug/search")
-def debug_search(q: str = Query(..., description="Запрос для тестового поиска"), k: int = 5):
-    """Диагностика: сырые id и расстояния из FAISS и что реально нашлось в БД."""
+def debug_search(q: str = Query(..., description="Р—Р°РїСЂРѕСЃ РґР»СЏ С‚РµСЃС‚РѕРІРѕРіРѕ РїРѕРёСЃРєР°"), k: int = 5):
+    """Р”РёР°РіРЅРѕСЃС‚РёРєР°: СЃС‹СЂС‹Рµ id Рё СЂР°СЃСЃС‚РѕСЏРЅРёСЏ РёР· FAISS Рё С‡С‚Рѕ СЂРµР°Р»СЊРЅРѕ РЅР°С€Р»РѕСЃСЊ РІ Р‘Р”."""
     try:
-        # 1) Выполним обычный поиск, но вернём промежуточные данные
+        # 1) Р’С‹РїРѕР»РЅРёРј РѕР±С‹С‡РЅС‹Р№ РїРѕРёСЃРє, РЅРѕ РІРµСЂРЅС‘Рј РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ
         from faiss_db.search import embed_query
         idxs = load_indices()
         qv = embed_query(q)
@@ -121,7 +111,7 @@ def debug_search(q: str = Query(..., description="Запрос для тесто
                 "distances": [float(x) for x in distances[0].tolist()],
             }
 
-        # 2) Пробуем получить записи из БД по (id+1) и по exact id
+        # 2) РџСЂРѕР±СѓРµРј РїРѕР»СѓС‡РёС‚СЊ Р·Р°РїРёСЃРё РёР· Р‘Р” РїРѕ (id+1) Рё РїРѕ exact id
         conn = sqlite3.connect(SQLITE_DB_PATH)
         cur = conn.cursor()
         details = {}
@@ -151,4 +141,6 @@ def debug_search(q: str = Query(..., description="Запрос для тесто
         raise HTTPException(status_code=500, detail=f"debug_search error: {e}")
 
 
-# Локальный запуск: uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+# Р›РѕРєР°Р»СЊРЅС‹Р№ Р·Р°РїСѓСЃРє: uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+
+

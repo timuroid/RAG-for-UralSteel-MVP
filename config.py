@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     FAISS_INDEX_PATH: str = "./faiss_index"
     SQLITE_DB_PATH: str = "./faiss_index/metadata.db"
     DATA_FILE: str = "bd.xlsx"
+    FAISS_INDEX_PATH_2: str = "./faiss_index2"
+    SQLITE_DB_PATH_2: str = "./faiss_index2/metadata.db"
+    DATA_FILE_2: str = "bd2.xlsx"
 
     # Модели
     EMBEDDING_MODEL: str = "text-embedding-ada-002"
@@ -55,6 +58,9 @@ YOUR_TELEGRAM_BOT_TOKEN = settings.YOUR_TELEGRAM_BOT_TOKEN
 FAISS_INDEX_PATH = settings.FAISS_INDEX_PATH
 SQLITE_DB_PATH = settings.SQLITE_DB_PATH
 DATA_FILE = settings.DATA_FILE
+FAISS_INDEX_PATH_2 = settings.FAISS_INDEX_PATH_2
+SQLITE_DB_PATH_2 = settings.SQLITE_DB_PATH_2
+DATA_FILE_2 = settings.DATA_FILE_2
 EMBEDDING_MODEL = settings.EMBEDDING_MODEL
 GPT_MODEL = settings.GPT_MODEL
 DIMENSION = settings.DIMENSION
